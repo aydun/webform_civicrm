@@ -74,7 +74,7 @@ abstract class wf_crm_webform_base {
         return CRM_Utils_System::version();
 
       default:
-        throw new Exception('Unknown property');
+        throw new Exception('Unknown property: '. $name);
     }
   }
 
@@ -958,12 +958,37 @@ abstract class wf_crm_webform_base {
    */
   protected function fixPaymentProcessorID() {
     // Check for is_test and payment_processor_id (pay later = 0 is set to '' here. is_test has no meaning for pay later).
+    /*
     if (!empty($this->data['contribution'][1]['contribution'][1]['is_test'])
         && !empty($this->data['contribution'][1]['contribution'][1]['payment_processor_id'])) {
       $paymentProcessor = \Civi\Payment\System::singleton()->getById($this->data['contribution'][1]['contribution'][1]['payment_processor_id']);
       $paymentProcessor = \Civi\Payment\System::singleton()->getByName($paymentProcessor->getPaymentProcessor()['name'], TRUE);
       $this->data['contribution'][1]['contribution'][1]['payment_processor_id'] = $paymentProcessor->getPaymentProcessor()['id'];
     }
+     */
+      /*
+    $test_key = 'civicrm_1_contribution_1_contribution_is_test';
+    $ppid_key = 'civicrm_1_contribution_1_contribution_payment_processor_id';
+    // Look for either test set in configuration or by submitted field
+    if (!empty($this->data['contribution'][1]['contribution'][1]['is_test']) ||
+      (!empty($this->enabled[$test_key]) && !empty(wf_crm_aval($this->form_state, 'storage:submitted:' . $this->enabled[$test_key])))) {
+      // Fix id stored in config
+      if (!empty($this->data['contribution'][1]['contribution'][1]['payment_processor_id'])) {
+        $paymentProcessor = \Civi\Payment\System::singleton()->getById($this->data['contribution'][1]['contribution'][1]['payment_processor_id']);
+        $paymentProcessor = \Civi\Payment\System::singleton()->getByName($paymentProcessor->getPaymentProcessor()['name'], TRUE);
+        $this->data['contribution'][1]['contribution'][1]['payment_processor_id'] = $paymentProcessor->getPaymentProcessor()['id'];
+      }
+      // Fix id stored in submitted data
+      elseif (!empty($this->enabled[$ppid_key])) {
+        $cid = $this->enabled[$ppid_key];
+        if (!empty(wf_crm_aval($this->form_state, 'storage:submitted:' . $cid))) {
+          $paymentProcessor = \Civi\Payment\System::singleton()->getById(wf_crm_aval($this->form_state, 'storage:submitted:' . $cid));
+          $paymentProcessor = \Civi\Payment\System::singleton()->getByName($paymentProcessor->getPaymentProcessor()['name'], TRUE);
+          $this->form_state['storage']['submitted'][$cid] = $paymentProcessor->getPaymentProcessor()['id'];
+        }
+      }
+    }
+       */
   }
 
 }
