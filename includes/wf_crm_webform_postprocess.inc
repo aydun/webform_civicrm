@@ -1186,8 +1186,22 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
           if ($is_active == FALSE) {
             $params['status_id'] = 'Pending';
           } else {
-            $params['status_id'] = $membershipStatus;
-            $params['end_date'] = $membershipEndDate;
+            // Allow Direct Debit renewals to extend end date
+            $paymentProcessorName = null;
+//dpm($this->data['contribution'][1]['contribution'][1], "contrib data");
+            if (!empty($this->data['contribution'][1]['contribution'][1]['payment_processor_id'])) {
+              $paymentProcessorID = $this->data['contribution'][1]['contribution'][1]['payment_processor_id'];
+//dpm($paymentProcessorID, "paymentProcessorID");
+              $paymentProcessorName = civicrm_api3('PaymentProcessor', 'getvalue', array(
+                'return' => 'name',
+                'id' => $paymentProcessorID,
+              ));
+            }
+//dpm($paymentProcessorName, "wfc: paymentProcessorName");
+            if ($paymentProcessorName != "Direct Debit") {
+              $params['status_id'] = $membershipStatus;
+              $params['end_date'] = $membershipEndDate;
+            }
           }
         }
       }
@@ -1789,7 +1803,6 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
    */
   private function submitLivePayment() {
     $contributionParams = $this->contributionParams();
-
     // Only if #installments = 1, do we process a single transaction/contribution. #installments = 0 (or not set) in CiviCRM Core means open ended commitment;
     $numInstallments = wf_crm_aval($contributionParams, 'installments', NULL, TRUE);
     $frequencyInterval = wf_crm_aval($contributionParams, 'frequency_unit');
@@ -1817,6 +1830,7 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
    * Generate recurring contribution and transact the first one
    */
   private function contributionRecur($contributionParams, $paymentType = 'live') {
+//dpm($contributionParams, "contributionParams");
     $numInstallments = wf_crm_aval($contributionParams, 'installments', NULL, TRUE);
     // if ($installments === 0) or $installments is not defined we treat as an open-ended recur
     $contributionFirstAmount = $contributionRecurAmount = $contributionParams['total_amount'];
@@ -1847,6 +1861,7 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
       'currency' => $contributionParams['currency'],
       'payment_processor_id' =>  $contributionParams['payment_processor_id'],
       'financial_type_id' =>  $contributionParams['financial_type_id'],
+      'payment_instrument_id' => $contributionParams['payment_instrument_id'],
     );
 
     if(empty($contributionParams['payment_processor_id'])) {
@@ -1854,6 +1869,7 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     }
 
     $resultRecur = wf_civicrm_api('ContributionRecur', 'create', $contributionRecurParams);
+//dpm($resultRecur, "resultRecur");
     $this->ent['contribution_recur'][1]['id'] = $resultRecur['id'];
 
     // Run the Transaction - and Create the Contribution Record - relay Recurring Series information in addition to the already existing Params [and re-key where needed]; at times two keys are required
@@ -1872,7 +1888,11 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     if ($paymentType === 'deferred') {
       $APIAction = 'create';
     }
+//dpm($APIAction, "apiaction");
+//dpm($contributionParams, "contribution params");
+//dpm($additionalParams, "additional params");
     $result = wf_civicrm_api('contribution', $APIAction, $contributionParams + $additionalParams);
+//dpm($result, "contribution result");
 
     // If transaction was successful - Update the Recurring Series - currency must be resubmitted or else it will re-default to USD; invoice_id is that of the initiating Contribution
     if (empty($result['error_message'])) {
@@ -2096,6 +2116,13 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
         }
       }
       $params['pan_truncation'] = substr($params['credit_card_number'],-4);
+    }
+
+    if (!empty($params['payment_processor_id']) && empty($params['payment_instrument_id'])) {
+      $params['payment_instrument_id'] = wf_civicrm_api('PaymentProcessor', 'getvalue', array(
+        'return' => 'payment_instrument_id',
+        'id' => $params['payment_processor_id'],
+      ));
     }
 
     // Save this stuff for later
