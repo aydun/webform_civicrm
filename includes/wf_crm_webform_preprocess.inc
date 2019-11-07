@@ -21,12 +21,12 @@ class wf_crm_webform_preprocess extends wf_crm_webform_base {
     $this->node = $form['#node'];
     $this->settings = $this->node->webform_civicrm;
     $this->data = $this->settings['data'];
-    $this->fixPaymentProcessorID();
     $this->ent['contact'] = array();
     $this->all_fields = wf_crm_get_fields();
     $this->all_sets = wf_crm_get_fields('sets');
     $this->enabled = wf_crm_enabled_fields($this->node);
     $this->line_items = wf_crm_aval($form_state, 'civicrm:line_items', array());
+//    $this->fixPaymentProcessorID();
   }
 
   /**
@@ -37,14 +37,14 @@ class wf_crm_webform_preprocess extends wf_crm_webform_base {
    * Set webform default values.
    */
   public function alterForm() {
-    // Add css & js
-    $this->addResources();
     // Add validation handler
     $this->form['#validate'][] = 'wf_crm_validate';
     // If this form is already in-process, IDs will be stored
     if (!empty($this->form_state['civicrm'])) {
       $this->ent = $this->form_state['civicrm']['ent'];
     }
+    // Add css & js
+    $this->addResources();
     $submitted_contacts = array();
     // Keep track of cids across multipage forms
     if (!empty($this->form_state['values']['submitted']) && wf_crm_aval($this->form_state, 'webform:page_count') > 1) {
@@ -200,6 +200,9 @@ class wf_crm_webform_preprocess extends wf_crm_webform_base {
       );
       $currency = $this->contribution_page['currency'];
       $contributionCallbackQuery = array('currency' => $currency, 'snippet' => 4);
+      if (!empty($this->ent['contact'][1]['id'])) {
+        $contributionCallbackQuery['cid'] = $this->ent['contact'][1]['id'];
+      }
       $contributionCallbackUrl = 'civicrm/payment/form';
       $js_vars['processor_id_key'] = 'processor_id';
       if (!empty($this->data['contribution'][1]['contribution'][1]['is_test'])) {
@@ -207,13 +210,10 @@ class wf_crm_webform_preprocess extends wf_crm_webform_base {
         $contributionCallbackQuery['action'] = CRM_Core_Action::description(CRM_Core_Action::PREVIEW);
       }
       $js_vars['contributionCallback'] = url($contributionCallbackUrl, array('query' => $contributionCallbackQuery, 'alias' => TRUE));
-      // Add payment processor - note we have to search in 2 places because $this->loadMultipageData hasn't been run. Maybe it should be?
-      $fid = 'civicrm_1_contribution_1_contribution_payment_processor_id';
-      if (!empty($this->enabled[$fid])) {
-        $js_vars['paymentProcessor'] = wf_crm_aval($this->form_state, 'storage:submitted:' . $this->enabled[$fid]);
-      }
-      else {
-        $js_vars['paymentProcessor'] = $this->getData($fid);
+
+      $pp_id = $this->getPaymentProcessorIDForMode();
+      if (!empty($pp_id)) {
+        $js_vars['paymentProcessor'] = $pp_id;
       }
     }
     if ($js_vars) {
@@ -222,6 +222,41 @@ class wf_crm_webform_preprocess extends wf_crm_webform_base {
         'type' => 'setting',
       );
     }
+  }
+
+  private function getPaymentProcessorIDForMode() {
+    $test_key = 'civicrm_1_contribution_1_contribution_is_test';
+    $ppid_key = 'civicrm_1_contribution_1_contribution_payment_processor_id';
+    // Look in config
+    if (!empty($this->data['contribution'][1]['contribution'][1]['payment_processor_id'])) {
+        $pp_id = $this->data['contribution'][1]['contribution'][1]['payment_processor_id'];
+//        $paymentProcessor = \Civi\Payment\System::singleton()->getById($this->data['contribution'][1]['contribution'][1]['payment_processor_id']);
+//        $paymentProcessor = \Civi\Payment\System::singleton()->getByName($paymentProcessor->getPaymentProcessor()['name'], TRUE);
+//        $this->data['contribution'][1]['contribution'][1]['payment_processor_id'] = $paymentProcessor->getPaymentProcessor()['id'];
+    }
+    // or stored data
+    // Add payment processor - note we have to search in 2 places because $this->loadMultipageData hasn't been run. Maybe it should be?
+    elseif (!empty($this->enabled[$ppid_key])) {
+      $pp_id = wf_crm_aval($this->form_state, 'storage:submitted:' . $this->enabled[$ppid_key]);
+ //         $paymentProcessor = \Civi\Payment\System::singleton()->getById(wf_crm_aval($this->form_state, 'storage:submitted:' . $cid));
+ //         $paymentProcessor = \Civi\Payment\System::singleton()->getByName($paymentProcessor->getPaymentProcessor()['name'], TRUE);
+ //         $this->form_state['storage']['submitted'][$cid] = $paymentProcessor->getPaymentProcessor()['id'];
+    }
+    else {
+      $pp_id = $this->getData($ppid_key);
+    }
+    // Look for either test set in configuration or by submitted field
+    if (!empty($pp_id) && 
+      (!empty($this->data['contribution'][1]['contribution'][1]['is_test']) ||
+      (!empty($this->enabled[$test_key]) && !empty(wf_crm_aval($this->form_state, 'storage:submitted:' . $this->enabled[$test_key]))))) {
+        $paymentProcessor = \Civi\Payment\System::singleton()->getById($pp_id); 
+        $paymentProcessor = \Civi\Payment\System::singleton()->getByName($paymentProcessor->getPaymentProcessor()['name'], TRUE);
+        $pp_id = $paymentProcessor->getPaymentProcessor()['id'];
+        $this->data['contribution'][1]['contribution'][1]['payment_processor_id'] = $pp_id;
+        $this->form_state['storage']['submitted'][$this->enabled[$ppid_key]] = $pp_id;
+    }
+    
+    return $pp_id;
   }
 
   /**
